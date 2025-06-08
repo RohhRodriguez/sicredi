@@ -1,0 +1,23 @@
+# Diretório de build do Maven
+target/
+
+# Arquivos do IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Arquivos do VS Code
+.vscode/
+
+# Arquivos temporários do sistema
+*.log
+*.tmp
+*.bak
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Ignorar arquivo de configuração real com credenciais
+env.properties
