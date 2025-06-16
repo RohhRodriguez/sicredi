@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Formulário de Votação</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            background: #f4f4f4;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        h1 {
+            color: #69be28;
+            text-align: center;
+            margin-bottom: 1em;
+        }
+        form {
+            background: #fff;
+            padding: 2em;
+            border-radius: 8px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 0 10px #ccc;
+        }
+        label {
+            display: block;
+            margin-top: 1em;
+        }
+        select, input, button {
+            width: 100%;
+            padding: 0.5em;
+            margin-top: 0.3em;
+        }
+        button {
+            margin-top: 1.5em;
+            background-color: #69be28;
+            color: white;
+            font-weight: bold;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #5aaa23;
+        }
+        .radio-group {
+            display: flex;
+            justify-content: center;
+            gap: 4em;
+            margin-top: 2em;
+        }
+        .radio-group label {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 1.1em;
+            gap: 0.5em;
+        }
+    </style>
+</head>
+<body>
+<form method="POST" action="/votacao/votar-form">
+    <h1>Sessão de Votação</h1>
+
+    <label for="assembleia">Assembleia:</label>
+    <select id="assembleia" name="codigoAssembleia" required>
+        <option value="">Carregando...</option>
+    </select>
+
+    <label for="pauta">Pauta:</label>
+    <select id="pauta" name="codigoPauta" required>
+        <option value="">Selecione uma Pauta</option>
+    </select>
+
+    <label for="codigoVotacao">Votação Aberta:</label>
+    <select id="codigoVotacao" name="codigoVotacao" required>
+        <option value="">Selecione uma Votação</option>
+    </select>
+
+    <label for="codigoAssociado">Associado:</label>
+    <select id="codigoAssociado" name="codigoAssociado" required>
+        <option value="">Carregando...</option>
+    </select>
+
+    <div class="radio-group">
+        <label><input type="radio" name="voto" value="SIM" required>Sim</label>
+        <label><input type="radio" name="voto" value="NAO">Não</label>
+    </div>
+
+    <button type="submit">Enviar Voto</button>
+</form>
+
+<script>
+    const assembleiaSelect = document.getElementById("assembleia");
+    const pautaSelect = document.getElementById("pauta");
+    const votacaoSelect = document.getElementById("codigoVotacao");
+    const associadoSelect = document.getElementById("codigoAssociado");
+
+    async function carregarAssembleias() {
+        const res = await fetch("/assembleia?status=ATIVO");
+        const page = await res.json();
+        const assembleias = page.content || [];
+
+        assembleiaSelect.innerHTML = '<option value="">Selecione</option>';
+        assembleias.forEach(a => {
+            const opt = document.createElement("option");
+            opt.value = a.codigo;
+            opt.textContent = a.nome;
+            assembleiaSelect.appendChild(opt);
+        });
+    }
+
+    async function carregarPautasEVotacoes(codigoAssembleia) {
+        pautaSelect.innerHTML = '<option value="">Carregando...</option>';
+        votacaoSelect.innerHTML = '<option value="">Selecione uma Pauta</option>';
+
+        const res = await fetch(`/pautas-abertas?codigoAssembleia=${codigoAssembleia}`);
+        const pautas = await res.json();
+
+        pautaSelect.innerHTML = '<option value="">Selecione</option>';
+        votacaoSelect.innerHTML = '<option value="">Selecione</option>';
+
+        pautas.forEach(p => {
+            const optPauta = document.createElement("option");
+            optPauta.value = p.codigo;
+            optPauta.textContent = p.nome || p.descricao;
+            pautaSelect.appendChild(optPauta);
+        });
+    }
+
+    async function carregarAssociadosHabilitados(codigoPauta) {
+        const associados = await fetch(`/associados-habilitados?codigoPauta=${codigoPauta}`).then(res => res.json());
+        associadoSelect.innerHTML = '<option value="">Selecione</option>';
+        associados.forEach(a => {
+            const opt = document.createElement("option");
+            opt.value = a.codigo;
+            opt.textContent = a.nome;
+            associadoSelect.appendChild(opt);
+        });
+    }
+
+    pautaSelect.addEventListener("change", async () => {
+        const pautaSelecionada = pautaSelect.value;
+        votacaoSelect.innerHTML = '<option value="">Selecione</option>';
+        if (!pautaSelecionada) return;
+
+        const res = await fetch(`/pautas-abertas?codigoAssembleia=${assembleiaSelect.value}`);
+        const pautas = await res.json();
+        const pauta = pautas.find(p => p.codigo === pautaSelecionada);
+
+        if (pauta && pauta.votacoes) {
+            pauta.votacoes
+                .filter(v => v.status === "ABERTA")
+                .forEach(votacao => {
+                    const opt = document.createElement("option");
+                    opt.value = votacao.codigo;
+                    opt.textContent = `${votacao.codigo} - Início: ${votacao.dataHoraInicio?.split("T")[0]}`;
+                    votacaoSelect.appendChild(opt);
+                });
+        }
+    });
+
+    assembleiaSelect.addEventListener("change", e => {
+        const codigo = e.target.value;
+        if (codigo) carregarPautasEVotacoes(codigo);
+    });
+
+    votacaoSelect.addEventListener("change", () => {
+        const pautaSelecionada = pautaSelect.value;
+        if (pautaSelecionada) carregarAssociadosHabilitados(pautaSelecionada);
+    });
+
+const form = document.querySelector("form");
+
+form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const submitButton = form.querySelector("button[type='submit']");
+    submitButton.disabled = true;
+    submitButton.textContent = "Enviando...";
+
+    const formData = new FormData(form);
+
+    try {
+        const res = await fetch("/votacao/votar-form", {
+            method: "POST",
+            body: formData
+        });
+
+        if (res.ok) {
+            alert("Voto registrado com sucesso!");
+            form.reset();
+        } else {
+            let mensagemErro = "Erro ao registrar voto.";
+            try {
+                const erroJson = await res.json();
+                if (erroJson && erroJson.error) {
+                    mensagemErro = erroJson.error;
+                }
+            } catch (e) {
+                const texto = await res.text();
+                mensagemErro = texto || mensagemErro;
+            }
+            alert(mensagemErro);
+        }
+    } catch (err) {
+        alert("Erro inesperado. Verifique sua conexão.");
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = "Enviar Voto";
+    }
+});
+
+    window.onload = async () => {
+        const params = new URLSearchParams(window.location.search);
+        const codigoAssembleia = params.get("codigoAssembleia");
+        const codigoPauta = params.get("codigoPauta");
+        const codigoVotacao = params.get("codigoVotacao");
+
+        try {
+            await carregarAssembleias();
+
+            if (codigoAssembleia) {
+                assembleiaSelect.value = codigoAssembleia;
+                await carregarPautasEVotacoes(codigoAssembleia);
+
+                if (codigoPauta) {
+                    pautaSelect.value = codigoPauta;
+                    pautaSelect.dispatchEvent(new Event("change"));
+
+                    // Espera a votacao carregar antes
+                    const esperarVotacao = () => new Promise(resolve => {
+                        const intervalo = setInterval(() => {
+                            const op = Array.from(votacaoSelect.options).find(opt => opt.value === codigoVotacao);
+                            if (op) {
+                                votacaoSelect.value = codigoVotacao;
+                                clearInterval(intervalo);
+                                resolve();
+                            }
+                        }, 100);
+                        setTimeout(() => clearInterval(intervalo), 3000);
+                    });
+                    await esperarVotacao();
+                    await carregarAssociadosHabilitados(codigoPauta);
+                }
+            }
+        } catch (e) {
+            console.error("Erro ao preencher formulário com dados da URL:", e);
+        }
+    };
+</script>
+</body>
+</html>
