@@ -1,5 +1,7 @@
 package com.sicredi.desafio.cadastros.pauta.service;
 
+import com.sicredi.desafio.cadastros.assembleia.model.entity.Assembleia;
+import com.sicredi.desafio.cadastros.assembleia.repository.AssembleiaRepository;
 import com.sicredi.desafio.cadastros.pauta.model.dto.FiltroPautaDTO;
 import com.sicredi.desafio.cadastros.pauta.model.dto.PautaDTO;
 import com.sicredi.desafio.cadastros.pauta.model.entity.Pauta;
@@ -19,17 +21,19 @@ import java.util.UUID;
 @Service
 public class PautaService {
     @Autowired PautaRepository pautaRepository;
+    @Autowired AssembleiaRepository assembleiaRepository;
     @Autowired EntityManager entityManager;
 
     // Retorna uma lista filtrada ou não de pautas
     public PageResponse<Pauta> findAllPautasWithFilter(FiltroPautaDTO filtroDTO, Pageable pageable) {
+        Pageable pageableNew = GenericMethods.validaPageable(pageable);
         if (filtroDTO.getStatusList() != null && !filtroDTO.getStatusList().isEmpty()) {
             for (String status : filtroDTO.getStatusList()) {
                 GenericMethods.validateEnumIfPresent(status, VotacaoStatus.class,
                         new VotacaoExceptions.TEStatusInvalidoException(VotacaoMsgExceptions.RANGE_STATUS_NAO_ENCONTRADO, status));
             }
         }
-        Page<Pauta> page = DynamicFilterUtil.filter(Pauta.class, filtroDTO, entityManager, pageable);
+        Page<Pauta> page = DynamicFilterUtil.filter(Pauta.class, filtroDTO, entityManager, pageableNew);
         return PageResponseUtil.fromPage(page);
     }
 
@@ -37,7 +41,10 @@ public class PautaService {
     public Pauta savePauta(PautaDTO dto) {
         Pauta pauta = UtilMethods.mapDtoToEntity(dto, Pauta.class);
         pauta.setCodigo(UtilMethods.generateNextCode(pautaRepository, Pauta::getCodigo));
-        pauta.setStatus(VotacaoStatus.PENDENTE.name()); //provisoriamente até os votos serem cadastrados
+
+        Assembleia assembleia = assembleiaRepository.findByCodigo(dto.getCodigoAssembleia()).orElseThrow(() ->
+                new VotacaoExceptions.TERegistroNaoEncontradoException(VotacaoMsgExceptions.REGISTRO_NAO_ENCONTRADO, "Código da Assembléia: ", dto.getCodigoAssembleia()));
+        pauta.setStatus(VotacaoStatus.ATIVA.name()); //todo: alterei para ativa logo no cadastro (alterei para todos os campos serem obrigatorios)
 
         return pautaRepository.save(pauta);
     }

@@ -19,6 +19,7 @@ public class FiltroAssembleiaDTO {
     private String nome;
     private String descricao;
     private Integer quantidadeMembros;
+    private String status;
     private List<String> statusList;
 
     @DateTimeFormat(pattern = "dd/MM/yyyy HH:mm")

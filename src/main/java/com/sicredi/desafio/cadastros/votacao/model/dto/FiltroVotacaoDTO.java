@@ -19,6 +19,7 @@ public class FiltroVotacaoDTO {
     private String codigoPauta;
     private String codigoAssociado;
     private String voto;
+    private String status;
     private List<String> statusList;
 
     @DateTimeFormat(pattern = "dd/MM/yyyy HH:mm")

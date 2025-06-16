@@ -2,8 +2,10 @@ package com.sicredi.desafio.cadastros.votacao.service;
 
 import com.sicredi.desafio.cadastros.assembleia.model.entity.Assembleia;
 import com.sicredi.desafio.cadastros.assembleia.repository.AssembleiaRepository;
+import com.sicredi.desafio.cadastros.associado.model.dto.FiltroAssociadoDTO;
 import com.sicredi.desafio.cadastros.associado.model.entity.Associado;
 import com.sicredi.desafio.cadastros.associado.repository.AssociadoRepository;
+import com.sicredi.desafio.cadastros.associado.service.AssociadoService;
 import com.sicredi.desafio.cadastros.pauta.model.entity.Pauta;
 import com.sicredi.desafio.cadastros.pauta.repository.PautaRepository;
 import com.sicredi.desafio.cadastros.votacao.model.dto.*;
@@ -11,7 +13,9 @@ import com.sicredi.desafio.cadastros.votacao.model.entity.Votacao;
 import com.sicredi.desafio.cadastros.votacao.model.entity.Voto;
 import com.sicredi.desafio.cadastros.votacao.repository.VotacaoRepository;
 import com.sicredi.desafio.cadastros.votacao.repository.VotoRepository;
-import com.sicredi.desafio.cadastros.votacao.scheduler.SessaoVotacaoFila;
+import com.sicredi.desafio.cadastros.votacao.scheduler.filasmanuais.SessaoVotacaoFila;
+import com.sicredi.desafio.cadastros.votacao.scheduler.filas.SessaoVotacaoMessage;
+import com.sicredi.desafio.config.FilaConfig;
 import com.sicredi.desafio.exceptions.VotacaoExceptions;
 import com.sicredi.desafio.exceptions.VotacaoMsgExceptions;
 import com.sicredi.desafio.integracoes.service.IntegracaoService;
@@ -19,6 +23,7 @@ import com.sicredi.desafio.utils.*;
 import com.sicredi.desafio.utils.enums.*;
 import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
@@ -26,9 +31,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class VotacaoService {
@@ -38,26 +42,36 @@ public class VotacaoService {
     @Autowired SessaoVotacaoFila filaVotacaoAbertaMockada;
     @Autowired AssociadoRepository associadoRepository;
     @Autowired PautaRepository pautaRepository;
-    @Autowired
-    AssembleiaRepository assembleiaRepository;
+    @Autowired AssembleiaRepository assembleiaRepository;
     @Autowired VotoRepository votoRepository;
+    @Autowired AssociadoService associadoService;
     @Autowired IntegracaoService integracaoService;
+    @Autowired private RabbitTemplate rabbitTemplate;
+    @Autowired private FilaConfig filaConfig;
 
     // Retorna uma lista filtrada ou não de votos (dá para filtrar por pauta ou votação tbm
     public PageResponse<Voto> findAllVotosWithFilter(FiltroVotoDTO filtroDTO, Pageable pageable) {
-        Page<Voto> page = DynamicFilterUtil.filter(Voto.class, filtroDTO, entityManager, pageable);
+        Pageable pageableNew = GenericMethods.validaPageable(pageable);
+        Page<Voto> page = DynamicFilterUtil.filter(Voto.class, filtroDTO, entityManager, pageableNew);
         return PageResponseUtil.fromPage(page);
     }
 
     // Retorna uma lista filtrada ou não de votações..
     public PageResponse<Votacao> findAllVotacoesWithFilter(FiltroVotacaoDTO filtroDTO, Pageable pageable) {
+        Pageable pageableNew = GenericMethods.validaPageable(pageable);
         if (filtroDTO.getStatusList() != null && !filtroDTO.getStatusList().isEmpty()) {
             for (String status : filtroDTO.getStatusList()) {
                 GenericMethods.validateEnumIfPresent(status, VotacaoStatus.class,
                         new VotacaoExceptions.TEStatusInvalidoException(VotacaoMsgExceptions.RANGE_STATUS_NAO_ENCONTRADO, status));
             }
         }
-        Page<Votacao> page = DynamicFilterUtil.filter(Votacao.class, filtroDTO, entityManager, pageable);
+        if (filtroDTO.getStatusList() != null && !filtroDTO.getStatusList().isEmpty()) {
+            for (String status : filtroDTO.getStatusList()) {
+                GenericMethods.validateEnumIfPresent(status, VotacaoStatus.class,
+                        new VotacaoExceptions.TEStatusInvalidoException(VotacaoMsgExceptions.RANGE_STATUS_NAO_ENCONTRADO, status));
+            }
+        }
+        Page<Votacao> page = DynamicFilterUtil.filter(Votacao.class, filtroDTO, entityManager, pageableNew);
         return PageResponseUtil.fromPage(page);
     }
 
@@ -98,11 +112,16 @@ public class VotacaoService {
         pautaRepository.save(pautaExistente);
 
         // TODO: Ajustar depois para usar fila do rabbitmq, azure ou outras (por enquanto ficando mockada para finalizar outras partes do desafio)
-        filaVotacaoAbertaMockada.adicionarSessao(salvo); // add em uma fila para recebimento de votos
-
+        //filaVotacaoAbertaMockada.adicionarSessao(salvo); // add em uma fila para recebimento de votos
+        SessaoVotacaoMessage message = new SessaoVotacaoMessage(
+                salvo.getId(),
+                salvo.getDataHoraEncerramento()
+        );
+        rabbitTemplate.convertAndSend("votacao-exchange", FilaConfig.SESSOES_VOTACAO_QUEUE,
+                new SessaoVotacaoMessage(votacao.getId(), votacao.getDataHoraEncerramento())
+        );
         return salvo;
     }
-
 
     public Voto saveVoteInSession(VotacaoDTO dto) {
         assert dto != null;
@@ -210,6 +229,17 @@ public class VotacaoService {
                 pautaRepository.save(pauta.get());
             }
         }
+        Set<String> codigosAssociadosVotantes = votos.stream().map(Voto::getCodigoAssociado).collect(Collectors.toSet());
+        for (String codigo : codigosAssociadosVotantes) {
+            Optional<Associado> optAssociado = associadoRepository.findByCodigo(codigo);
+            if (optAssociado.isPresent()) {
+                Associado associado = optAssociado.get();
+                associado.setStatus(AssociadoStatus.ATIVO.name());
+                associadoRepository.save(associado);
+            } else {
+                System.out.println("Associado não encontrado com código: " + codigo);
+            }
+        }
         return votacaoRepository.save(votacao);
     }
 
@@ -219,7 +249,7 @@ public class VotacaoService {
                 new VotacaoExceptions.TERegistroNaoEncontradoException(VotacaoMsgExceptions.REGISTRO_NAO_ENCONTRADO, "ID da Votação", id));
     }
 
-    private Associado verificaAtualizaStatusAssociado(Associado associado, Votacao votacao) {
+    public Associado verificaAtualizaStatusAssociado(Associado associado, Votacao votacao) {
         // TODO: Aqui vou usar o método do service de integração para verificar se é ou não habilitado para votação
         boolean cpfValido = integracaoService.validaCPF(associado.getCpf());
 
@@ -227,13 +257,67 @@ public class VotacaoService {
             associado.setStatus(AssociadoStatus.PENDENTE.name()); // seto o status para pendente e a partir de agora ele não poderá mais votar até regularizar o cadasrtro
             throw new VotacaoExceptions.TEVotacaoInvalidoException(VotacaoMsgExceptions.CPF_ASSOCIADO_NAO_HABILITADO, associado.getCodigo(), associado.getCpf());
         } else {
-            if (votacao.getStatus().equalsIgnoreCase(VotacaoStatus.ABERTA.name()) && associado.getStatus().equalsIgnoreCase(AssociadoStatus.ATIVO.name())) {
-                associado.setStatus(AssociadoStatus.HABILITADO.name()); // seto o status para habilitado somente se a votacao estiver aberta
-            } else {
-                associado.setStatus(AssociadoStatus.ATIVO.name()); // seto o status padrão caso a votacao estiver fechada já
+            associado.setStatus(AssociadoStatus.HABILITADO.name()); //se estiver tudo certo com o cpf ele já fica habilitado para votar
+            boolean jaVotou = votoRepository.findByCodigoVotacaoAndCodigoAssociado(votacao.getCodigo(), associado.getCodigo()).isPresent();
+            if (votacao.getStatus().equalsIgnoreCase(VotacaoStatus.ABERTA.name()) && jaVotou) {
+                associado.setStatus(AssociadoStatus.ATIVO.name()); // seto o status para ATIVO se a votacao estiver aberta e ele já votou nela..
             }
         }
         return associadoRepository.save(associado);
+    }
+
+    public List<Associado> buscarAssociadosHabilitadosParaFormulario(String codigoPauta) {
+        List<Associado> associados = associadoRepository.findAll().stream().filter(associado ->
+                !associado.getStatus().equalsIgnoreCase(AssociadoStatus.INATIVO.name()) && !associado.getStatus().equalsIgnoreCase(AssociadoStatus.PENDENTE.name())).toList();
+        List<Votacao> votacao = votacaoRepository.findVotacoesAbertasByCodigoPauta(codigoPauta);
+        List<Associado> habilitados = new ArrayList<>();
+
+        for (Associado associado : associados) {
+            try {
+                Associado atualizado = verificaAtualizaStatusAssociado(associado, votacao.getFirst());
+                if (atualizado.getStatus().equalsIgnoreCase(AssociadoStatus.HABILITADO.name())) {
+                    habilitados.add(atualizado);
+                }
+            } catch (VotacaoExceptions.TEVotacaoInvalidoException ex) {
+                System.out.println("erro teste");
+            }
+        }
+        return habilitados;
+    }
+
+    public List<VotacaoResumoListasDTO> getListasResultadosSimples(FiltroVotacaoDTO filtroDTO, Pageable pageable) {
+        List<VotacaoResumoListasDTO> resultado = new ArrayList<>();
+        List<Votacao> votacoes = findAllVotacoesWithFilter(filtroDTO, pageable).getContent();
+
+        for (Votacao votacao : votacoes) {
+            Optional<Assembleia> assembleia = assembleiaRepository.findByCodigo(votacao.getCodigoAssembleia());
+            Optional<Pauta> pauta = pautaRepository.findByCodigo(votacao.getCodigoPauta());
+            List<Voto> votos = votoRepository.findAllByCodigoVotacao(votacao.getCodigo());
+
+            if (assembleia.isPresent() && pauta.isPresent()) {
+                VotacaoResumoListasDTO dto = new VotacaoResumoListasDTO(votacao, assembleia.get(), pauta.get());
+
+                if (votacao.getStatus().equalsIgnoreCase(VotacaoStatus.ENCERRADA.name())) {
+                    int votosSim = (int) votos.stream().filter(v -> v.getVoto().equalsIgnoreCase(VotoOption.SIM.name())).count();
+                    int votosNao = votos.size() - votosSim;
+                    int total = votosSim + votosNao;
+                    dto.setVotosSim(votosSim);
+                    dto.setVotosNao(votosNao);
+                    String resultadoStr = votosSim == votosNao ? "EMPATE" : votosSim > votosNao ? "SIM" : "NAO";
+                    dto.setResultado(resultadoStr);
+
+                    double percentual;
+                    if (total > 0) {
+                        percentual = resultadoStr.equalsIgnoreCase("EMPATE") ? 50.0 : (resultadoStr.equalsIgnoreCase("SIM") ? (votosSim * 100.0) / total : (votosNao * 100.0) / total);
+                    } else {
+                        percentual = 0.0;
+                    }
+                    dto.setPercentual(percentual);
+                }
+                resultado.add(dto);
+            }
+        }
+        return resultado;
     }
 
 }

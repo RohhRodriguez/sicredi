@@ -1,8 +1,9 @@
 package com.sicredi.desafio.utils.enums;
 
 public enum VotacaoStatus {
-    ABERTA,
+    ATIVA,
     CANCELADA,
     PENDENTE,
+    ABERTA,
     ENCERRADA
 }

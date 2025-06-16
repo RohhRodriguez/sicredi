@@ -1,4 +1,4 @@
-package com.sicredi.desafio.cadastros.votacao.scheduler;
+package com.sicredi.desafio.cadastros.votacao.scheduler.filasmanuais;
 
 import com.sicredi.desafio.cadastros.votacao.model.entity.Votacao;
 import org.springframework.stereotype.Component;

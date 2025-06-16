@@ -19,6 +19,7 @@ public class FiltroPautaDTO {
     private String nome;
     private String descricao;
     private String codigoAssembleia;
+    private String status;
     private List<String> statusList;
 
     @DateTimeFormat(pattern = "dd/MM/yyyy HH:mm")

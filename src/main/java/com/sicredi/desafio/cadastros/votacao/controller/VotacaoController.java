@@ -1,18 +1,23 @@
 package com.sicredi.desafio.cadastros.votacao.controller;
 
-import com.sicredi.desafio.cadastros.votacao.model.dto.FiltroVotacaoDTO;
-import com.sicredi.desafio.cadastros.votacao.model.dto.FiltroVotoDTO;
-import com.sicredi.desafio.cadastros.votacao.model.dto.SessaoVotacaoDTO;
-import com.sicredi.desafio.cadastros.votacao.model.dto.VotacaoDTO;
+import com.sicredi.desafio.cadastros.pauta.service.PautaService;
+import com.sicredi.desafio.cadastros.votacao.model.dto.*;
+import com.sicredi.desafio.cadastros.votacao.model.entity.Votacao;
 import com.sicredi.desafio.cadastros.votacao.service.VotacaoService;
+import com.sicredi.desafio.exceptions.VotacaoExceptions;
+import com.sicredi.desafio.utils.enums.VotacaoStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.ui.Model;
 
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 //TODO: Não vi necessidade de nesse primeiro momento fazer os metodos de PUT e DELETE, mas revisitar aqui caso haja necessidade
@@ -20,8 +25,8 @@ import java.util.UUID;
 @RequestMapping("votacao")
 @Tag(name = "Votação", description = "Operações relacionadas as Votações em pautas abertas")
 public class VotacaoController {
-    @Autowired
-    private VotacaoService votacaoService;
+    @Autowired private VotacaoService votacaoService;
+    @Autowired private PautaService pautaService;
 
     @GetMapping
     @Operation(summary = "Listar Votações com filtro",
@@ -65,6 +70,42 @@ public class VotacaoController {
             description = "Retorna uma consulta SQL com o registro encontrado, em caso de sucesso.")
     public ResponseEntity<?> getVotacaoById(@PathVariable UUID id) {
         return ResponseEntity.ok(votacaoService.findVotacaoById(id));
+    }
+
+    @PostMapping("/votar-form")
+    @Operation(summary = "Votação via formulário",
+            description = "Salva votação através do formulário de votação.")
+    public ResponseEntity<?> votarViaFormulario(VotacaoDTO dto) {
+        try {
+            votacaoService.saveVoteInSession(dto);
+            return ResponseEntity.ok().build();
+        } catch (VotacaoExceptions.TEVotacaoInvalidoException ev) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", ev.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erro inesperado ao votar."));
+        }
+    }
+
+    @GetMapping("/lista-abertas")
+    @Operation(summary = "Listagem das votações abertas",
+            description = "Lista somente as votações abertas no momento da chamada.")
+    @ResponseBody
+    public List<VotacaoResumoListasDTO> listarVotacoesAbertas(Pageable pageable) {
+        FiltroVotacaoDTO filtro = new FiltroVotacaoDTO();
+        filtro.setStatus(VotacaoStatus.ABERTA.name());
+        return votacaoService.getListasResultadosSimples(filtro, pageable);
+    }
+
+    @GetMapping("/lista-encerradas")
+    @Operation(summary = "Listagem das votações encerradas",
+            description = "Lista somente as votações encerradas no momento da chamada.")
+    @ResponseBody
+    public List<VotacaoResumoListasDTO> listarVotacoesEncerradas(Pageable pageable) {
+        FiltroVotacaoDTO filtro = new FiltroVotacaoDTO();
+        filtro.setStatus(VotacaoStatus.ENCERRADA.name());
+        return votacaoService.getListasResultadosSimples(filtro, pageable);
     }
 
 }

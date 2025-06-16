@@ -1,16 +1,14 @@
 package com.sicredi.desafio.cadastros.pauta.model.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
 
 @Getter
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
 public class PautaDTO {
-    private String nome;
-    private String descricao;
-    private String codigoAssembleia;
+    @NotNull private String nome;
+    @NotNull private String descricao;
+    @NotNull private String codigoAssembleia;
 }
